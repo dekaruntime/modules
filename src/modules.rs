@@ -37,3 +37,14 @@ pub fn detect_phpx_module_root(handler_path: &str) -> Option<PathBuf> {
 
     None
 }
+
+pub fn ensure_phpx_module_root_env(handler_path: &str) {
+    if std::env::var("PHPX_MODULE_ROOT").is_ok() {
+        return;
+    }
+    if let Some(root) = detect_phpx_module_root(handler_path) {
+        unsafe {
+            std::env::set_var("PHPX_MODULE_ROOT", root);
+        }
+    }
+}
