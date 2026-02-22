@@ -52,8 +52,7 @@ pub fn ensure_phpx_module_root_env_with<Exists, CurrentExe, Get, Set>(
     current_exe: &CurrentExe,
     env_get: &Get,
     env_set: &mut Set,
-)
-where
+) where
     Exists: Fn(&Path) -> bool,
     CurrentExe: Fn() -> Option<PathBuf>,
     Get: Fn(&str) -> Option<String>,
@@ -128,7 +127,12 @@ mod tests {
         for command in ["ls", "deka db"] {
             let env = Arc::new(Mutex::new(HashMap::<String, String>::new()));
             let env_get_store = Arc::clone(&env);
-            let env_get = move |key: &str| env_get_store.lock().ok().and_then(|map| map.get(key).cloned());
+            let env_get = move |key: &str| {
+                env_get_store
+                    .lock()
+                    .ok()
+                    .and_then(|map| map.get(key).cloned())
+            };
             let env_set_store = Arc::clone(&env);
             let mut env_set = |k: &str, v: &str| {
                 if let Ok(mut map) = env_set_store.lock() {
@@ -144,7 +148,9 @@ mod tests {
                 &mut env_set,
             );
             assert_eq!(
-                env.lock().ok().and_then(|map| map.get("PHPX_MODULE_ROOT").cloned()),
+                env.lock()
+                    .ok()
+                    .and_then(|map| map.get("PHPX_MODULE_ROOT").cloned()),
                 Some("/repo".to_string()),
                 "command '{}' should inherit runtime root resolver",
                 command
