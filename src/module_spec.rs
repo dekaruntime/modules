@@ -39,7 +39,10 @@ pub fn canonical_php_package_spec(spec: &str) -> Option<String> {
     if trimmed.starts_with('@') {
         return Some(trimmed.to_string());
     }
-    if is_bare_module_specifier(trimmed) {
+    // Package specs are @scope/name. For convenience, only simple unscoped
+    // tokens map to @deka/<name>; nested import paths (e.g. component/router)
+    // are import-time aliases, not package names.
+    if is_bare_module_specifier(trimmed) && !trimmed.contains('/') {
         return Some(format!("@deka/{}", trimmed));
     }
     None
@@ -67,8 +70,13 @@ mod tests {
     #[test]
     fn canonicalizes_bare_packages_to_deka_scope() {
         assert_eq!(
-            canonical_php_package_spec("component/router"),
-            Some("@deka/component/router".to_string())
+            canonical_php_package_spec("json"),
+            Some("@deka/json".to_string())
         );
+    }
+
+    #[test]
+    fn does_not_map_nested_import_paths_to_package_specs() {
+        assert_eq!(canonical_php_package_spec("component/router"), None);
     }
 }
