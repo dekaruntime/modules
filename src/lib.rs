@@ -9,3 +9,8 @@ pub mod ds_imports;
 pub mod module_spec;
 pub mod modules;
 pub mod project_gate;
+
+pub mod integrity;
+
+#[cfg(test)]
+mod reconcile_tests;

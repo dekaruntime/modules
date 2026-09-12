@@ -1,0 +1,9 @@
+// import { bad } from "comment"
+/* export * from "block" */
+const text = "import { bad } from \"string\""
+const single = 'import "single"'
+const template = `from "template"`
+const from = "variable"
+const important = "identifier"
+import("dynamic")
+import { real } from "crypto"

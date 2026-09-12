@@ -7,6 +7,7 @@ pub fn paths(source: &str) -> Vec<String> {
     let mut out = Vec::new();
     let bytes = source.as_bytes();
     let mut i = 0;
+    let mut declaration = false;
     while i < bytes.len() {
         match bytes[i] {
             b'/' if bytes.get(i + 1) == Some(&b'/') => {
@@ -21,26 +22,40 @@ pub fn paths(source: &str) -> Vec<String> {
                 }
                 i = i.saturating_add(2);
             }
-            b'"' | b'\'' => i = skip_string(bytes, i),
+            b'"' | b'\'' | b'`' => {
+                i = skip_string(bytes, i);
+                declaration = false;
+            }
             b'i' if is_word(bytes, i, b"import") => {
                 i += 6;
                 i = skip_ws(bytes, i);
+                declaration = bytes.get(i) != Some(&b'(');
                 if i < bytes.len()
                     && (bytes[i] == b'"' || bytes[i] == b'\'')
                     && let Some((path, next)) = take_string(bytes, i)
                 {
+                    declaration = false;
                     out.push(path);
                     i = next;
                     continue;
                 }
             }
-            b'f' if is_word(bytes, i, b"from") => {
+            b'e' if is_word(bytes, i, b"export") => {
+                i = skip_ws(bytes, i + 6);
+                declaration = matches!(bytes.get(i), Some(b'{' | b'*'));
+            }
+            b';' => {
+                declaration = false;
+                i += 1;
+            }
+            b'f' if declaration && is_word(bytes, i, b"from") => {
                 i += 4;
                 i = skip_ws(bytes, i);
                 if i < bytes.len()
                     && (bytes[i] == b'"' || bytes[i] == b'\'')
                     && let Some((path, next)) = take_string(bytes, i)
                 {
+                    declaration = false;
                     out.push(path);
                     i = next;
                     continue;
@@ -63,23 +78,40 @@ fn is_word(bytes: &[u8], i: usize, word: &[u8]) -> bool {
 }
 
 fn is_ident(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$' || !b.is_ascii()
 }
 
 fn skip_ws(bytes: &[u8], mut i: usize) -> usize {
-    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-        i += 1;
+    loop {
+        match bytes.get(i) {
+            Some(b) if b.is_ascii_whitespace() => i += 1,
+            Some(b'/') if bytes.get(i + 1) == Some(&b'/') => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            Some(b'/') if bytes.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i + 1 < bytes.len() && &bytes[i..i + 2] != b"*/" {
+                    i += 1;
+                }
+                i = (i + 2).min(bytes.len());
+            }
+            _ => break,
+        }
     }
     i
 }
 
 fn skip_string(bytes: &[u8], i: usize) -> usize {
-    take_string(bytes, i).map(|(_, next)| next).unwrap_or(i + 1)
+    take_string(bytes, i)
+        .map(|(_, next)| next)
+        .unwrap_or(bytes.len())
 }
 
 fn take_string(bytes: &[u8], i: usize) -> Option<(String, usize)> {
     let quote = *bytes.get(i)?;
-    if quote != b'"' && quote != b'\'' {
+    if quote != b'"' && quote != b'\'' && quote != b'`' {
         return None;
     }
     let mut j = i + 1;
