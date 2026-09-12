@@ -1,6 +1,6 @@
 [package]
 name = "deka-modules"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "deka's module-resolution contracts: specifier vocabulary, project gate, DS import scanning, ds_modules resolution"
