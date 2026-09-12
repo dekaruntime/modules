@@ -17,8 +17,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::module_spec::{
-    ds_source_candidates, is_bare_module_specifier, is_closed_stdlib_module_spec,
-    module_spec_aliases, STDLIB_SPEC_PREFIXES,
+    STDLIB_SPEC_PREFIXES, ds_source_candidates, is_bare_module_specifier,
+    is_closed_stdlib_module_spec, module_spec_aliases,
 };
 use crate::modules::resolve_modules_dir;
 
@@ -212,7 +212,11 @@ pub fn validate_project(
         return Err(format!(
             "{who} requires {} at project root when using stdlib imports ({}). Run `deka install`.",
             modules_dir.display(),
-            stdlib_imports.iter().cloned().collect::<Vec<_>>().join(", ")
+            stdlib_imports
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
 
@@ -267,6 +271,20 @@ fn is_declared(spec: &str, declared: &BTreeSet<String>) -> bool {
     declared.contains(bare_name(spec))
 }
 
+/// True when `spec` is provided by a `deka link`ed package — either the package
+/// itself or a subpath within it.
+fn is_satisfied_by_link(
+    spec: &str,
+    linked: &std::collections::BTreeMap<String, std::path::PathBuf>,
+) -> bool {
+    let spec = spec.trim();
+    linked.keys().any(|package| {
+        crate::module_spec::module_spec_aliases(package)
+            .into_iter()
+            .any(|alias| spec == alias || spec.starts_with(&format!("{alias}/")))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,7 +296,11 @@ mod tests {
     fn setup(manifest: &str) -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
         write(tmp.path(), "deka.json", manifest);
-        write(tmp.path(), "deka.lock", r#"{"lockfileVersion":1,"packages":{}}"#);
+        write(
+            tmp.path(),
+            "deka.lock",
+            r#"{"lockfileVersion":1,"packages":{}}"#,
+        );
         let crypto = tmp.path().join("ds_modules/@deka/crypto");
         std::fs::create_dir_all(&crypto).unwrap();
         std::fs::write(crypto.join("index.ds"), "export fn noop() {}\n").unwrap();
@@ -375,18 +397,4 @@ mod tests {
         assert!(!is_stdlib_module_spec("@user/thing"));
         assert!(!is_stdlib_module_spec("./local"));
     }
-}
-
-/// True when `spec` is provided by a `deka link`ed package — either the package
-/// itself or a subpath within it.
-fn is_satisfied_by_link(
-    spec: &str,
-    linked: &std::collections::BTreeMap<String, std::path::PathBuf>,
-) -> bool {
-    let spec = spec.trim();
-    linked.keys().any(|package| {
-        crate::module_spec::module_spec_aliases(package)
-            .into_iter()
-            .any(|alias| spec == alias || spec.starts_with(&format!("{alias}/")))
-    })
 }

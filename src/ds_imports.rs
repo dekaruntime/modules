@@ -25,23 +25,25 @@ pub fn paths(source: &str) -> Vec<String> {
             b'i' if is_word(bytes, i, b"import") => {
                 i += 6;
                 i = skip_ws(bytes, i);
-                if i < bytes.len() && (bytes[i] == b'"' || bytes[i] == b'\'') {
-                    if let Some((path, next)) = take_string(bytes, i) {
-                        out.push(path);
-                        i = next;
-                        continue;
-                    }
+                if i < bytes.len()
+                    && (bytes[i] == b'"' || bytes[i] == b'\'')
+                    && let Some((path, next)) = take_string(bytes, i)
+                {
+                    out.push(path);
+                    i = next;
+                    continue;
                 }
             }
             b'f' if is_word(bytes, i, b"from") => {
                 i += 4;
                 i = skip_ws(bytes, i);
-                if i < bytes.len() && (bytes[i] == b'"' || bytes[i] == b'\'') {
-                    if let Some((path, next)) = take_string(bytes, i) {
-                        out.push(path);
-                        i = next;
-                        continue;
-                    }
+                if i < bytes.len()
+                    && (bytes[i] == b'"' || bytes[i] == b'\'')
+                    && let Some((path, next)) = take_string(bytes, i)
+                {
+                    out.push(path);
+                    i = next;
+                    continue;
                 }
             }
             _ => i += 1,

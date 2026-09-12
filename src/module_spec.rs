@@ -123,7 +123,7 @@ pub fn is_valid_package_name(name: &str) -> bool {
 pub const DS_SOURCE_EXTENSIONS: &[&str] = &["ds", "dsx"];
 
 pub fn is_ds_source_extension(ext: &str) -> bool {
-    DS_SOURCE_EXTENSIONS.iter().any(|known| *known == ext)
+    DS_SOURCE_EXTENSIONS.contains(&ext)
 }
 
 pub fn is_ds_source_path(path: &Path) -> bool {
@@ -197,9 +197,9 @@ pub fn resolve_ds_source_file(base: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        canonical_php_package_spec, closed_stdlib_module_exports, closed_stdlib_module_id,
-        ds_source_candidates, is_closed_stdlib_module_spec, is_valid_package_name,
-        module_spec_aliases, STDLIB_SPEC_PREFIXES,
+        STDLIB_SPEC_PREFIXES, canonical_php_package_spec, closed_stdlib_module_exports,
+        closed_stdlib_module_id, ds_source_candidates, is_closed_stdlib_module_spec,
+        is_valid_package_name, module_spec_aliases,
     };
     use std::path::Path;
 
