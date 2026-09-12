@@ -1,0 +1,14 @@
+import "./side.ds"
+import { echo } from "io"
+import defaultValue from 'json'
+import * as crypto from "@deka/crypto"
+import {
+  thing,
+  other
+} from "@vendor/package/subpath"
+export { Point } from "./point.ds"
+export * from "./all.ds"
+import /* gate trivia */ "./commented.ds"
+import { x } from /* intervening comment */ "bytes"
+import { y } from // line comment
+"buffer"

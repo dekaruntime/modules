@@ -10,12 +10,35 @@ pub fn is_bare_module_specifier(spec: &str) -> bool {
         && !spec.starts_with("file://")
 }
 
+/// Authoritative dsc prefix vocabulary (dsc#167), owned here for both consumers.
 /// Bare-specifier prefixes that name stdlib module families. Both the project
 /// gate (`is_stdlib_module_spec`) and the browser import map emitted by
 /// `deka build` derive their prefix lists from here so the two cannot drift:
 /// the gate decides which specifiers are stdlib, the map decides where the
 /// browser loads them from.
 pub const STDLIB_SPEC_PREFIXES: &[&str] = &["component/", "deka/", "encoding/", "db/"];
+
+/// Exhaustive stdlib names, apart from the families in [`STDLIB_SPEC_PREFIXES`].
+/// dsc#167: `@deka/` is an alias, never a wildcard; `ui` is no longer stdlib.
+/// This vocabulary is distinct from the compiler-provided export contracts in
+/// [`CLOSED_STDLIB_MODULES`].
+pub const STDLIB_MODULE_NAMES: &[&str] = &[
+    "json", "postgres", "mysql", "sqlite", "bytes", "buffer", "http", "tcp", "tls", "fs", "crypto",
+    "jwt", "test", "cookies", "auth", "db", "time", "io", "math",
+];
+
+/// Shared compiler/gate stdlib membership (dsc#167).
+pub fn is_stdlib_module_spec(spec: &str) -> bool {
+    let spec = spec.trim();
+    if !is_bare_module_specifier(spec) {
+        return false;
+    }
+    let bare = spec.strip_prefix("@deka/").unwrap_or(spec);
+    STDLIB_MODULE_NAMES.contains(&bare)
+        || STDLIB_SPEC_PREFIXES
+            .iter()
+            .any(|prefix| bare.starts_with(prefix))
+}
 
 /// Closed, toolchain-provided stdlib modules and the exact named exports each
 /// one guarantees. Unlike every other stdlib module, these have no package
