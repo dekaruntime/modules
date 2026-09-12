@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 
 use crate::module_spec::{
     STDLIB_SPEC_PREFIXES, ds_source_candidates, is_bare_module_specifier,
-    is_closed_stdlib_module_spec, module_spec_aliases,
+    is_closed_stdlib_module_spec, is_summoned_js_module_spec, module_spec_aliases,
+    resolve_summoned_js_module_file, summoned_js_package_name,
 };
 use crate::modules::resolve_modules_dir;
 
@@ -101,6 +102,9 @@ pub fn is_stdlib_module_spec(spec: &str) -> bool {
 /// (`@deka/encoding/json`), since `deka install` writes packages under
 /// `@deka/<pkg>/`.
 pub fn resolve_module_file(modules_dir: &Path, spec: &str) -> Option<PathBuf> {
+    if is_summoned_js_module_spec(spec) {
+        return None;
+    }
     let mut aliases = module_spec_aliases(spec);
     if spec.contains('/')
         && !spec.starts_with('@')
@@ -121,18 +125,21 @@ pub fn resolve_module_file(modules_dir: &Path, spec: &str) -> Option<PathBuf> {
 /// Validate a project against the imports its module graph actually contains.
 ///
 /// Rules, in order:
-///   1. `deka.lock` exists, unless the caller waived it
-///   2. every stdlib import is **declared** in `deka.json` dependencies
-///   3. every stdlib import resolves to a file under the modules directory
+///   1. summoned JS imports are declared, locked, and vendored (never waived)
+///   2. `deka.lock` exists, unless the caller waived it
+///   3. every stdlib import is **declared** in `deka.json` dependencies
+///   4. every stdlib import resolves to a file under the modules directory
 ///
-/// Rule 2 is the one that did not exist. Resolution was satisfied by a directory
-/// happening to be present, so a package could import something it never
+/// The stdlib declaration rule did not originally exist. Resolution was
+/// satisfied by a directory happening to be present, so a package could import something it never
 /// declared and install fine for whoever happened to have it.
 pub fn validate_project(
     project_root: &Path,
     imports: &[String],
     opts: &GateOptions,
 ) -> Result<(), String> {
+    validate_summoned_js_imports(project_root, imports, opts.context)?;
+
     // An external module root means the runtime supplies the stdlib; the local
     // tree is not expected to contain it.
     if opts
@@ -161,7 +168,7 @@ pub fn validate_project(
         .filter(|s| is_stdlib_module_spec(s))
         // Closed, toolchain-provided modules (dsc#142's `math`) ship inside
         // the compiler: there is intentionally no package to declare or
-        // install, so Rules 2 and 3 do not apply to them.
+        // install, so stdlib declaration and installation do not apply to them.
         .filter(|s| !is_closed_stdlib_module_spec(s))
         .collect();
 
@@ -169,7 +176,7 @@ pub fn validate_project(
         return Ok(());
     }
 
-    // Rule 2 — declared in deka.json.
+    // Stdlib declaration — declared in deka.json.
     let declared = declared_dependencies(project_root);
     let undeclared: Vec<&String> = stdlib_imports
         .iter()
@@ -189,7 +196,7 @@ pub fn validate_project(
 
     // A `deka link`ed package satisfies an import from a working tree, with
     // nothing installed (deka#470). Drop those before the on-disk rules below;
-    // they are deliberately still subject to Rule 2, because a link changes
+    // they are deliberately still subject to declaration, because a link changes
     // *where* a dependency comes from, not whether it is a dependency.
     //
     // A manifest naming a target that has been moved or deleted is an error,
@@ -206,7 +213,7 @@ pub fn validate_project(
         return Ok(());
     }
 
-    // Rule 3 — present on disk.
+    // Stdlib installation — present on disk.
     let modules_dir = resolve_modules_dir(project_root);
     if !modules_dir.is_dir() {
         return Err(format!(
@@ -237,6 +244,66 @@ pub fn validate_project(
     }
 }
 
+/// Summoned dependencies are project-owned, even when a runtime supplies the
+/// stdlib or waives its lockfile. Exact @js identities prevent scope aliases
+/// and local links from satisfying a different trust class.
+fn validate_summoned_js_imports(
+    project_root: &Path,
+    imports: &[String],
+    who: &str,
+) -> Result<(), String> {
+    let imports: BTreeSet<&str> = imports
+        .iter()
+        .map(|spec| spec.trim())
+        .filter(|spec| is_summoned_js_module_spec(spec))
+        .collect();
+    if imports.is_empty() {
+        return Ok(());
+    }
+    for spec in &imports {
+        if summoned_js_package_name(spec).is_none() {
+            return Err(format!(
+                "{who}: invalid summoned JavaScript specifier: {spec}"
+            ));
+        }
+    }
+    let declared = declared_dependencies(project_root);
+    for spec in &imports {
+        if !declared.contains(*spec) {
+            return Err(format!(
+                "{who}: {spec} imported but not declared in deka.json. Use `deka summon <source>`."
+            ));
+        }
+    }
+    let lock_path = project_root.join("deka.lock");
+    let raw = std::fs::read_to_string(&lock_path).map_err(|error| {
+        format!(
+            "{who}: summoned JavaScript requires {}: {error}",
+            lock_path.display()
+        )
+    })?;
+    let lock: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("{who}: invalid {}: {error}", lock_path.display()))?;
+    for spec in imports {
+        if !lock
+            .get("packages")
+            .and_then(|value| value.as_object())
+            .and_then(|packages| packages.get(spec))
+            .is_some_and(|entry| {
+                serde_json::from_value::<(String, String, serde_json::Value, String)>(entry.clone())
+                    .is_ok()
+            })
+        {
+            return Err(format!(
+                "{who}: {spec} missing package entry in deka.lock. Use `deka summon <source>`."
+            ));
+        }
+        resolve_summoned_js_module_file(project_root, spec)
+            .map_err(|error| format!("{who}: {spec}: {error}. Use `deka summon <source>`."))?;
+    }
+    Ok(())
+}
+
 /// Dependency names from `deka.json`, normalised to their bare form so
 /// `@deka/crypto` and `crypto` compare equal.
 fn declared_dependencies(project_root: &Path) -> BTreeSet<String> {
@@ -261,6 +328,9 @@ fn declared_dependencies(project_root: &Path) -> BTreeSet<String> {
 /// first segment, which is what a manifest would name.
 fn bare_name(spec: &str) -> &str {
     let spec = spec.trim();
+    if is_summoned_js_module_spec(spec) {
+        return spec;
+    }
     if let Some(rest) = spec.strip_prefix("@deka/") {
         return rest.split('/').next().unwrap_or(rest);
     }
