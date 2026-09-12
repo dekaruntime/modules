@@ -76,6 +76,9 @@ pub fn canonical_php_package_spec(spec: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
+    if is_summoned_js_module_spec(trimmed) {
+        return None;
+    }
     if trimmed.starts_with('@') {
         return Some(trimmed.to_string());
     }
@@ -112,6 +115,96 @@ pub fn is_valid_package_name(name: &str) -> bool {
         && package
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+}
+
+/// Reserved routing prefix for vendored, summoned JavaScript (rfd#39).
+pub const SUMMONED_JS_SPEC_PREFIX: &str = "@js/";
+
+/// Recognize the routing class even when its name is invalid, so malformed
+/// summoned imports cannot fall through to registry or DekaScript resolution.
+pub fn is_summoned_js_module_spec(spec: &str) -> bool {
+    spec.trim().starts_with(SUMMONED_JS_SPEC_PREFIX)
+}
+
+/// Validated unscoped vendor name. The full identity shares the package-name
+/// validator; subpaths, nested scopes, and traversal are not supported.
+pub fn summoned_js_package_name(spec: &str) -> Option<&str> {
+    let spec = spec.trim();
+    is_valid_package_name(spec)
+        .then(|| spec.strip_prefix(SUMMONED_JS_SPEC_PREFIX))
+        .flatten()
+}
+
+/// Resolve `@js/<name>` beneath the project's `js_modules/<name>/`.
+///
+/// A package.json `module` entry takes precedence over `main`; `index.mjs`
+/// is used only when neither field exists (or package.json is absent).
+/// Explicit entries must be nonempty strings naming existing files: a broken
+/// entry or malformed manifest is an error, never a silent fallback. Entries
+/// must stay within the vendor directory, including after symlink resolution.
+/// No extension probing, exports-map lookup, or network resolution occurs.
+pub fn resolve_summoned_js_module_file(project_root: &Path, spec: &str) -> Result<PathBuf, String> {
+    let name = summoned_js_package_name(spec)
+        .ok_or_else(|| format!("invalid summoned JavaScript specifier: {spec}"))?;
+    let dir = project_root.join("js_modules").join(name);
+    let manifest = dir.join("package.json");
+    let entry = match std::fs::read_to_string(&manifest) {
+        Ok(raw) => {
+            let json: serde_json::Value = serde_json::from_str(&raw)
+                .map_err(|error| format!("invalid {}: {error}", manifest.display()))?;
+            let object = json
+                .as_object()
+                .ok_or_else(|| format!("{} must be an object", manifest.display()))?;
+            match object.get("module").or_else(|| object.get("main")) {
+                Some(value) => value
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| {
+                        format!("{} entry must be a nonempty string", manifest.display())
+                    })?
+                    .to_string(),
+                None => "index.mjs".to_string(),
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => "index.mjs".to_string(),
+        Err(error) => return Err(format!("cannot read {}: {error}", manifest.display())),
+    };
+    let entry_path = Path::new(&entry);
+    if entry.contains('\\')
+        || entry_path.components().any(|part| {
+            matches!(
+                part,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(format!(
+            "JavaScript entry escapes {}: {entry}",
+            dir.display()
+        ));
+    }
+    let path = dir.join(entry_path);
+    let root = dir.canonicalize().map_err(|error| {
+        format!(
+            "JavaScript package not vendored at {}: {error}",
+            dir.display()
+        )
+    })?;
+    let resolved = path.canonicalize().map_err(|error| {
+        format!(
+            "JavaScript entry not vendored at {}: {error}",
+            path.display()
+        )
+    })?;
+    if !resolved.starts_with(&root) || !resolved.is_file() {
+        return Err(format!(
+            "JavaScript entry is not a file within {}: {entry}",
+            dir.display()
+        ));
+    }
+    Ok(path)
 }
 
 /// Source extensions DekaScript resolution recognizes, in search order.
